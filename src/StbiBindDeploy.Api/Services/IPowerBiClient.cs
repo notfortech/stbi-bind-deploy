@@ -11,4 +11,8 @@ public interface IPowerBiClient
 {
     Task<WorkspaceInfo?> GetWorkspaceByNameAsync(string name, CancellationToken cancellationToken = default);
     Task<WorkspaceInfo> CreateWorkspaceAsync(string name, string? capacityId, CancellationToken cancellationToken = default);
+
+    /// <summary>Push Dataset API only supports name-based lookup, not true schema-aware "update" — see DeploymentService for how this is used.</summary>
+    Task<DatasetInfo?> GetDatasetByNameAsync(string workspaceId, string name, CancellationToken cancellationToken = default);
+    Task<DatasetInfo> CreateDatasetAsync(string workspaceId, string name, ParsedSemanticModel model, CancellationToken cancellationToken = default);
 }

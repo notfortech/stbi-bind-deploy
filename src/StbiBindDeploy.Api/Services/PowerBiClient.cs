@@ -106,6 +106,88 @@ public sealed class PowerBiClient : IPowerBiClient
         return workspace;
     }
 
+    public async Task<DatasetInfo?> GetDatasetByNameAsync(string workspaceId, string name, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation("PowerBI.GetDatasetByName.Requested WorkspaceId={WorkspaceId} Name={Name}", workspaceId, name);
+        using var response = await SendAsync(HttpMethod.Get, $"{ApiBase}/groups/{workspaceId}/datasets", body: null, cancellationToken);
+        var json = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogError("PowerBI.GetDatasetByName.Failed StatusCode={StatusCode} Body={Body}", (int)response.StatusCode, Truncate(json));
+            throw new PowerBiApiException($"Power BI list-datasets call failed: {(int)response.StatusCode} {Truncate(json)}");
+        }
+
+        using var doc = JsonDocument.Parse(json);
+        foreach (var ds in doc.RootElement.GetProperty("value").EnumerateArray())
+        {
+            var dsName = ds.GetProperty("name").GetString();
+            if (string.Equals(dsName, name, StringComparison.OrdinalIgnoreCase))
+            {
+                var found = new DatasetInfo(ds.GetProperty("id").GetString()!, dsName!);
+                _logger.LogInformation("PowerBI.GetDatasetByName.Found DatasetId={DatasetId}", found.Id);
+                return found;
+            }
+        }
+
+        _logger.LogInformation("PowerBI.GetDatasetByName.NotFound WorkspaceId={WorkspaceId} Name={Name}", workspaceId, name);
+        return null;
+    }
+
+    public async Task<DatasetInfo> CreateDatasetAsync(string workspaceId, string name, ParsedSemanticModel model, CancellationToken cancellationToken = default)
+    {
+        _logger.LogInformation(
+            "PowerBI.CreateDataset.Requested WorkspaceId={WorkspaceId} Name={Name} TableCount={TableCount} RelationshipCount={RelationshipCount}",
+            workspaceId, name, model.Tables.Count, model.Relationships.Count);
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            name,
+            defaultMode = "Push",
+            tables = model.Tables.Select(t => new
+            {
+                name = t.Name,
+                columns = t.Columns.Select(c => new { name = c.Name, dataType = MapDataType(c.DataType) }),
+                measures = t.Measures.Count == 0
+                    ? null
+                    : t.Measures.Select(m => new { name = m.Name, expression = m.Dax, formatString = m.FormatString })
+            }),
+            relationships = model.Relationships.Select(r => new
+            {
+                name = $"{r.FromTable}_{r.FromColumn}_{r.ToTable}_{r.ToColumn}",
+                fromTable = r.FromTable,
+                fromColumn = r.FromColumn,
+                toTable = r.ToTable,
+                toColumn = r.ToColumn
+            })
+        }, new JsonSerializerOptions { DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull });
+
+        using var response = await SendAsync(HttpMethod.Post, $"{ApiBase}/groups/{workspaceId}/datasets", payload, cancellationToken);
+        var json = await response.Content.ReadAsStringAsync(cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            _logger.LogError("PowerBI.CreateDataset.Failed WorkspaceId={WorkspaceId} StatusCode={StatusCode} Body={Body}",
+                workspaceId, (int)response.StatusCode, Truncate(json));
+            throw new PowerBiApiException($"Power BI create-dataset call failed: {(int)response.StatusCode} {Truncate(json)}");
+        }
+
+        using var doc = JsonDocument.Parse(json);
+        var dataset = new DatasetInfo(doc.RootElement.GetProperty("id").GetString()!, name);
+        _logger.LogInformation("PowerBI.CreateDataset.Succeeded WorkspaceId={WorkspaceId} DatasetId={DatasetId}", workspaceId, dataset.Id);
+        return dataset;
+    }
+
+    /// <summary>TMDL dataType -> Power BI Push Dataset API dataType. Unrecognized values fall back to String rather than failing the whole deploy over a naming mismatch.</summary>
+    private static string MapDataType(string tmdlDataType) => tmdlDataType.Trim().ToLowerInvariant() switch
+    {
+        "int64" or "integer" or "int" => "Int64",
+        "double" or "decimal" or "number" => "Double",
+        "boolean" or "bool" => "Boolean",
+        "datetime" or "date" => "DateTime",
+        _ => "String"
+    };
+
     private async Task AssignToCapacityAsync(string workspaceId, string capacityId, CancellationToken cancellationToken)
     {
         _logger.LogInformation("PowerBI.AssignToCapacity.Requested WorkspaceId={WorkspaceId} CapacityId={CapacityId}", workspaceId, capacityId);

@@ -29,8 +29,10 @@ builder.Configuration.AddInMemoryCollection(envOverrides.Where(kv => kv.Value is
 builder.Services.AddOptions<PowerBiOptions>().BindConfiguration(PowerBiOptions.SectionName);
 builder.Services.AddOptions<SecurityOptions>().BindConfiguration(SecurityOptions.SectionName);
 
-// ── Power BI client ───────────────────────────────────────────────────────
+// ── Power BI client + deploy pipeline ────────────────────────────────────
 builder.Services.AddHttpClient<IPowerBiClient, PowerBiClient>();
+builder.Services.AddSingleton<ITmdlParser, TmdlParser>();
+builder.Services.AddScoped<IDeploymentService, DeploymentService>();
 
 // ── API + health checks ──────────────────────────────────────────────────
 builder.Services.AddControllers();
