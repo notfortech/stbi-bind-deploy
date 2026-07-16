@@ -1,0 +1,12 @@
+## .NET
+bin/
+obj/
+*.user
+.vs/
+
+## appsettings overrides that might carry local secrets
+appsettings.Local.json
+appsettings.*.local.json
+
+## OS
+.DS_Store
