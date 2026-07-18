@@ -21,7 +21,11 @@ public sealed class TmdlParser : ITmdlParser
 {
     private static readonly Regex TableDeclaration = new(@"^\s*table\s+(\S+)\s*$", RegexOptions.Multiline);
     private static readonly Regex BlockStart = new(@"^\s*(column|measure|partition|annotation)\b", RegexOptions.Multiline);
-    private static readonly Regex ColumnStart = new(@"^\s*column\s+'?([^'\r\n]+?)'?\s*$");
+    // Trailing (?:=.*)? allows calculated columns ("column 'Name' = <DAX expression>") to match
+    // too, not just plain source columns — without it, a calculated column's block matched
+    // neither this nor MeasureStart and was silently dropped, which could zero out a table's
+    // column count (e.g. a DAX-derived date table with only calculated columns).
+    private static readonly Regex ColumnStart = new(@"^\s*column\s+'?([^'\r\n]+?)'?\s*(?:=.*)?$");
     private static readonly Regex MeasureStart = new(@"^\s*measure\s+'([^']+)'\s*=\s*(.+)$");
     private static readonly Regex RelationshipStart = new(@"^\s*relationship\s+\S+\s*$", RegexOptions.Multiline);
     private static readonly Regex FromColumn = new(@"^\s*fromColumn:\s*([^.\r\n]+)\.(\S+)\s*$", RegexOptions.Multiline);
