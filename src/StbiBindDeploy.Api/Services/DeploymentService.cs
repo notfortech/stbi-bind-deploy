@@ -53,6 +53,8 @@ public sealed class DeploymentService : IDeploymentService
         var parsed = _parser.Parse(filesByPath);
         Step($"Parsed {parsed.Tables.Count} table(s), {parsed.Relationships.Count} relationship(s)");
 
+        FoldMeasuresOnlyTables(parsed, Step);
+
         if (parsed.Tables.Count == 0)
             throw new InvalidOperationException("No tables could be parsed from the supplied TMDL files — nothing to deploy.");
 
@@ -70,5 +72,40 @@ public sealed class DeploymentService : IDeploymentService
         Step($"Dataset created: {dataset.Id}");
 
         return new DeployDatasetResult(workspace.Id, workspace.Name, dataset.Id, dataset.Name, Created: true, steps);
+    }
+
+    /// <summary>
+    /// stbi_transformers' TmdlAuthoringService always emits a tables/_Measures.tmdl "island"
+    /// table holding every DAX measure, with source = {BLANK()} and deliberately zero columns —
+    /// standard TMDL practice for keeping measures organizationally separate from data tables.
+    /// The Power BI Push Dataset API has no equivalent concept and rejects any table with an
+    /// empty columns array ("Table must contain at least one column."), so a columnless
+    /// measures-only table can never be pushed as-is. Fold its measures onto the first real
+    /// (column-bearing) table instead and drop the empty table from the payload — this loses
+    /// nothing since Power BI measures aren't meaningfully scoped to "their" table in reports.
+    /// </summary>
+    private static void FoldMeasuresOnlyTables(ParsedSemanticModel parsed, Action<string> step)
+    {
+        var measuresOnlyTables = parsed.Tables.Where(t => t.IsMeasuresOnly && t.Columns.Count == 0).ToList();
+        if (measuresOnlyTables.Count == 0)
+            return;
+
+        var target = parsed.Tables.FirstOrDefault(t => !t.IsMeasuresOnly && t.Columns.Count > 0);
+
+        foreach (var table in measuresOnlyTables)
+        {
+            parsed.Tables.Remove(table);
+            if (target is not null)
+            {
+                target.Measures.AddRange(table.Measures);
+                step($"Folded {table.Measures.Count} measure(s) from '{table.Name}' onto '{target.Name}' " +
+                     "— Power BI's Push Dataset API can't host a columnless measures-only table");
+            }
+            else
+            {
+                step($"Dropped measures-only table '{table.Name}' — no other table with columns available " +
+                     $"to host its {table.Measures.Count} measure(s)");
+            }
+        }
     }
 }
