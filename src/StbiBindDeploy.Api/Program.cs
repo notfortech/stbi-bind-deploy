@@ -34,6 +34,10 @@ builder.Services.AddHttpClient<IPowerBiClient, PowerBiClient>();
 builder.Services.AddSingleton<ITmdlParser, TmdlParser>();
 builder.Services.AddScoped<IDeploymentService, DeploymentService>();
 
+// ── Template rebind (new, standalone flow — see TemplateRebindService) ──
+builder.Services.AddHttpClient<IPowerBiRebindClient, PowerBiRebindClient>();
+builder.Services.AddScoped<ITemplateRebindService, TemplateRebindService>();
+
 // ── API + health checks ──────────────────────────────────────────────────
 builder.Services.AddControllers();
 builder.Services.AddHealthChecks();

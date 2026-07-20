@@ -58,6 +58,9 @@ public sealed class DeploymentService : IDeploymentService
         if (parsed.Tables.Count == 0)
             throw new InvalidOperationException("No tables could be parsed from the supplied TMDL files — nothing to deploy.");
 
+        ValidateRelationships(parsed);
+        Step($"Validated {parsed.Relationships.Count} relationship(s) against {parsed.Tables.Count} table(s)");
+
         Step($"Checking for an existing dataset named '{request.DatasetName}'");
         var existingDataset = await _powerBi.GetDatasetByNameAsync(workspace.Id, request.DatasetName, cancellationToken);
 
@@ -107,5 +110,49 @@ public sealed class DeploymentService : IDeploymentService
                      $"to host its {table.Measures.Count} measure(s)");
             }
         }
+    }
+
+    /// <summary>
+    /// stbi_transformers' TmdlAuthoringService documents relationship/column-existence checking
+    /// as this service's job ("S8"), not its own — its own deterministic validator only checks
+    /// the required-file list, forbidden tables, and that every measure appears in
+    /// tables/_Measures.tmdl. Nothing upstream actually verifies a relationship's fromColumn/
+    /// toColumn exists on the table it claims to reference, so an LLM-authored mismatch (e.g. a
+    /// relationship pointing at "EmployeeKey" when the dimension table's key column is actually
+    /// named something else) sails through as syntactically valid TMDL and is only caught deep
+    /// inside Power BI's TOM engine, surfacing as an opaque 400/502 well after the network call.
+    /// Catch it here instead, deterministically, before ever calling Power BI.
+    /// </summary>
+    private static void ValidateRelationships(ParsedSemanticModel parsed)
+    {
+        var tablesByName = parsed.Tables.ToDictionary(t => t.Name, t => t, StringComparer.OrdinalIgnoreCase);
+        var errors = new List<string>();
+
+        foreach (var rel in parsed.Relationships)
+        {
+            var relationshipName = $"{rel.FromTable}_{rel.FromColumn}_{rel.ToTable}_{rel.ToColumn}";
+            ValidateEndpoint(relationshipName, "fromColumn", rel.FromTable, rel.FromColumn, tablesByName, errors);
+            ValidateEndpoint(relationshipName, "toColumn", rel.ToTable, rel.ToColumn, tablesByName, errors);
+        }
+
+        if (errors.Count > 0)
+            throw new InvalidOperationException(
+                "TMDL relationships reference tables/columns that don't exist in the parsed model — " +
+                "the authored TMDL is internally inconsistent: " + string.Join(" | ", errors));
+    }
+
+    private static void ValidateEndpoint(
+        string relationshipName, string endpointLabel, string tableName, string columnName,
+        Dictionary<string, ParsedTable> tablesByName, List<string> errors)
+    {
+        if (!tablesByName.TryGetValue(tableName, out var table))
+        {
+            errors.Add($"relationship '{relationshipName}': {endpointLabel} table '{tableName}' not found");
+            return;
+        }
+
+        if (!table.Columns.Any(c => c.Name.Equals(columnName, StringComparison.OrdinalIgnoreCase)))
+            errors.Add($"relationship '{relationshipName}': {endpointLabel} '{tableName}.{columnName}' " +
+                       $"— column '{columnName}' not found on table '{tableName}'");
     }
 }
