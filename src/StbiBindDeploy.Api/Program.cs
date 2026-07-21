@@ -38,6 +38,10 @@ builder.Services.AddScoped<IDeploymentService, DeploymentService>();
 builder.Services.AddHttpClient<IPowerBiRebindClient, PowerBiRebindClient>();
 builder.Services.AddScoped<ITemplateRebindService, TemplateRebindService>();
 
+// ── PBIP import (new, standalone flow — see PbipImportService) ──────────
+builder.Services.AddHttpClient<IPbipImportClient, PbipImportClient>();
+builder.Services.AddScoped<IPbipImportService, PbipImportService>();
+
 // ── API + health checks ──────────────────────────────────────────────────
 builder.Services.AddControllers();
 builder.Services.AddHealthChecks();
